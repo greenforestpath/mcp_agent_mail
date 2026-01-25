@@ -1650,6 +1650,7 @@ def _agent_to_dict(agent: Agent) -> dict[str, Any]:
         "program": agent.program,
         "model": agent.model,
         "task_description": agent.task_description,
+        "identity_tag": getattr(agent, "identity_tag", ""),
         "inception_ts": _iso(agent.inception_ts),
         "last_active_ts": _iso(agent.last_active_ts),
         "project_id": agent.project_id,
@@ -2860,6 +2861,7 @@ async def _create_agent_record(
     program: str,
     model: str,
     task_description: str,
+    identity_tag: str = "",
 ) -> Agent:
     if project.id is None:
         raise ValueError("Project must have an id before creating agents.")
@@ -2871,6 +2873,7 @@ async def _create_agent_record(
             program=program,
             model=model,
             task_description=task_description,
+            identity_tag=identity_tag,
         )
         session.add(agent)
         await session.commit()
@@ -2885,6 +2888,7 @@ async def _get_or_create_agent(
     model: str,
     task_description: str,
     settings: Settings,
+    identity_tag: str = "",
 ) -> Agent:
     if project.id is None:
         raise ValueError("Project must have an id before creating agents.")
@@ -2939,6 +2943,7 @@ async def _get_or_create_agent(
                 agent.program = program
                 agent.model = model
                 agent.task_description = task_description
+                agent.identity_tag = identity_tag
                 agent.last_active_ts = _naive_utc()
                 session.add(agent)
                 await session.commit()
@@ -2951,6 +2956,7 @@ async def _get_or_create_agent(
                 program=program,
                 model=model,
                 task_description=task_description,
+                identity_tag=identity_tag,
             )
             session.add(candidate)
             try:
@@ -2977,6 +2983,7 @@ async def _get_or_create_agent(
                     agent.program = program
                     agent.model = model
                     agent.task_description = task_description
+                    agent.identity_tag = identity_tag
                     agent.last_active_ts = _naive_utc()
                     session.add(agent)
                     await session.commit()
@@ -4524,6 +4531,7 @@ def build_mcp_server() -> FastMCP:
         name: Optional[str] = None,
         task_description: str = "",
         attachments_policy: str = "auto",
+        identity_tag: str = "",
         format: Optional[str] = None,
     ) -> dict[str, Any]:
         """
@@ -4609,7 +4617,7 @@ def build_mcp_server() -> FastMCP:
         ap = (attachments_policy or "auto").lower()
         if ap not in {"auto", "inline", "file"}:
             ap = "auto"
-        agent = await _get_or_create_agent(project, name, program, model, task_description, settings)
+        agent = await _get_or_create_agent(project, name, program, model, task_description, settings, identity_tag)
         # Persist attachment policy if changed
         if getattr(agent, "attachments_policy", None) != ap:
             async with get_session() as session:
@@ -4691,6 +4699,7 @@ def build_mcp_server() -> FastMCP:
         name_hint: Optional[str] = None,
         task_description: str = "",
         attachments_policy: str = "auto",
+        identity_tag: str = "",
         format: Optional[str] = None,
     ) -> dict[str, Any]:
         """
@@ -4743,7 +4752,7 @@ def build_mcp_server() -> FastMCP:
         ap = (attachments_policy or "auto").lower()
         if ap not in {"auto", "inline", "file"}:
             ap = "auto"
-        agent = await _create_agent_record(project, unique_name, program, model, task_description)
+        agent = await _create_agent_record(project, unique_name, program, model, task_description, identity_tag)
         # Update attachments policy immediately
         async with get_session() as session:
             db_agent = await session.get(Agent, agent.id)

@@ -64,6 +64,7 @@ class Agent(SQLModel, table=True):
     program: str = Field(max_length=128)
     model: str = Field(max_length=128)
     task_description: str = Field(default="", max_length=2048)
+    identity_tag: str = Field(default="", max_length=255)  # User-defined identity e.g. "mac-cfwos-claude-1"
     inception_ts: datetime = Field(default_factory=_utcnow_naive)
     last_active_ts: datetime = Field(default_factory=_utcnow_naive)
     attachments_policy: str = Field(default="auto", max_length=16)
