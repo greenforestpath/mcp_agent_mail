@@ -1,4 +1,25 @@
-RULE NUMBER 1 (NEVER EVER EVER FORGET THIS RULE!!!): YOU ARE NEVER ALLOWED TO DELETE A FILE WITHOUT EXPRESS PERMISSION FROM ME OR A DIRECT COMMAND FROM ME. EVEN A NEW FILE THAT YOU YOURSELF CREATED, SUCH AS A TEST CODE FILE. YOU HAVE A HORRIBLE TRACK RECORD OF DELETING CRITICALLY IMPORTANT FILES OR OTHERWISE THROWING AWAY TONS OF EXPENSIVE WORK THAT I THEN NEED TO PAY TO REPRODUCE. AS A RESULT, YOU HAVE PERMANENTLY LOST ANY AND ALL RIGHTS TO DETERMINE THAT A FILE OR FOLDER SHOULD BE DELETED. YOU MUST **ALWAYS** ASK AND *RECEIVE* CLEAR, WRITTEN PERMISSION FROM ME BEFORE EVER EVEN THINKING OF DELETING A FILE OR FOLDER OF ANY KIND!!!
+# AGENTS.md — MCP Agent Mail
+
+> **MANDATORY**: Read this file AND `CLAUDE.md` at session start. Re-read after any restart, compaction, or tool crash.
+>
+> **Also read**: `../AGENTS.md` for root CFWOS behavioral rules (meta-improvement obligation, tool guides, rehydration protocol).
+
+---
+
+## RULE 0 - HUMAN OVERRIDE
+
+If the user tells you to do something that conflicts with rules below, **the user wins**. They are in charge, not you.
+
+---
+
+## RULE 1 - NO FILE DELETION
+
+**You may NOT delete any file or directory without explicit permission in the current session.**
+
+- This includes files you just created (tests, tmp files, scripts)
+- You do not get to decide something is "safe" to remove
+- If you think something should be removed, STOP and ask
+- You must receive clear written approval BEFORE any deletion
 
 ### IRREVERSIBLE GIT & FILESYSTEM ACTIONS — DO-NOT-EVER BREAK GLASS
 
