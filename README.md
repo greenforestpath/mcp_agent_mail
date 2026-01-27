@@ -66,13 +66,27 @@ What this does:
 - Starts the MCP HTTP server on port 8765 and prints a masked bearer token
 - Creates helper scripts under `scripts/` (including `run_server_with_token.sh`)
 - Adds an `am` shell alias to your `.zshrc` or `.bashrc` for quick server startup (just type `am` in a new terminal!)
-- Installs/updates, verifies, and wires the Beads `bd` CLI into your PATH via its official curl installer so the task planner is ready out of the box (pass `--skip-beads` to opt out or install manually)
+- Installs **Beads Rust (`br`)**, a Rust reimplementation of the Beads task tracker, and creates a `bd` shell alias pointing to `br` for backwards compatibility. This replaces any existing `bd` (Go) installation. Pass `--skip-beads` to opt out. See [beads_rust](https://github.com/Dicklesworthstone/beads_rust) for details on CLI differences.
 - Installs/updates the Beads Viewer `bv` TUI for interactive task browsing and AI-friendly robot commands (pass `--skip-bv` to opt out)
 - Prints a short on-exit summary of each setup step so you immediately know what changed
 
 Prefer a specific location or options? Add flags like `--dir <path>`, `--project-dir <path>`, `--no-start`, `--start-only`, `--port <number>`, or `--token <hex>`.
 
 Already have Beads or Beads Viewer installed? Append `--skip-beads` and/or `--skip-bv` to bypass automatic installation.
+
+### Important: Beads Rust (br) Replaces Beads Go (bd)
+
+The installer automatically replaces `bd` (the original Go-based Beads CLI) with `br` (Beads Rust):
+
+1. **`br` is the actively maintained version.** Beads Rust is a complete reimplementation with ongoing development, while the original Go version is no longer actively maintained.
+
+2. **Existing `bd` users get automatic aliasing.** The installer creates a shell alias so that `bd` commands continue to work by redirecting to `br`. Your existing workflows and muscle memory are preserved.
+
+3. **A migration skill is installed for agents.** AI coding agents receive a `bd-br-migration` skill that helps them adapt to any CLI differences between the two implementations.
+
+4. **Same data format, compatible workflows.** Both implementations use the same `.beads/issues.jsonl` format, so your existing Beads data remains fully compatible.
+
+To opt out of this replacement, pass `--skip-beads` to the installer. See the [beads_rust repository](https://github.com/Dicklesworthstone/beads_rust) for detailed documentation on CLI differences.
 
 ### Starting the server in the future
 
@@ -173,12 +187,14 @@ Common pitfalls
 
 ## Integrating with Beads (dependency-aware task planning)
 
-Beads is a lightweight task planner (`bd` CLI) that complements Agent Mail by keeping status and dependencies in one place while Mail handles messaging, file reservations, and audit trails. Project: [steveyegge/beads](https://github.com/steveyegge/beads)
+Beads is a lightweight task planner that complements Agent Mail by keeping status and dependencies in one place while Mail handles messaging, file reservations, and audit trails.
+
+**Note on implementations:** The MCP Agent Mail installer installs [Beads Rust (`br`)](https://github.com/Dicklesworthstone/beads_rust), a Rust reimplementation, and creates a `bd` alias for backwards compatibility. The original Go implementation is at [steveyegge/beads](https://github.com/steveyegge/beads). Both share the same data format (`.beads/issues.jsonl`) but have some CLI differences. Use `--skip-beads` during installation if you prefer to manage this yourself.
 
 Highlights:
 - Beads owns task prioritization; Agent Mail carries the conversations and artifacts.
 - Shared identifiers (e.g., `bd-123`) keep Beads issues, Mail threads, and commits aligned.
-- Install the `bd` CLI via prebuilt release or Go build; see the repository for platform specifics.
+- The `br` CLI (aliased as `bd`) provides similar functionality to the original with some enhancements.
 
 Copy/paste blurb for agent-facing docs (leave as-is for reuse):
 
