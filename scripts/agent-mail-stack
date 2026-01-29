@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+# agent-mail-stack - manage local Agent Mail server (localhost-open)
+# Creates a local .venv on first run to avoid uv runtime issues in background.
+#
+# Usage:
+#   agent-mail-stack up|start     # Start server (idempotent, background)
+#   agent-mail-stack run|fg       # Run server in foreground (for tmux panes)
+#   agent-mail-stack down|stop    # Stop server (pid-based)
+#   agent-mail-stack status       # Show status + health
+#   agent-mail-stack ps           # Status + pid + ports
+#   agent-mail-stack logs         # Tail log
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AGENT_MAIL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+RUN_SCRIPT="$AGENT_MAIL_DIR/scripts/run_server_with_token.sh"
+VENV_DIR="${AGENT_MAIL_VENV:-$AGENT_MAIL_DIR/.venv}"
+PYTHON_BIN="$VENV_DIR/bin/python"
+
+HOST="${AGENT_MAIL_HOST:-127.0.0.1}"
+PORT="${AGENT_MAIL_PORT:-8765}"
+LOG_FILE="${AGENT_MAIL_LOG_FILE:-/tmp/agent-mail.log}"
+PID_FILE="${AGENT_MAIL_PID_FILE:-/tmp/agent-mail.pid}"
+
+ensure_venv() {
+  if [[ -x "$PYTHON_BIN" ]]; then
+    return 0
+  fi
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "uv not found in PATH; install uv or set AGENT_MAIL_PYTHON" >&2
+    exit 1
+  fi
+  echo "Creating venv for Agent Mail..."
+  (
+    cd "$AGENT_MAIL_DIR"
+    uv python install 3.14
+    uv venv -p 3.14 "$VENV_DIR"
+    uv sync
+  )
+}
+
+health_ready() {
+  command -v curl >/dev/null 2>&1 && curl -fs "http://${HOST}:${PORT}/health/readiness" >/dev/null 2>&1
+}
+
+port_open() {
+  if command -v lsof >/dev/null 2>&1 && lsof -ti tcp:"$PORT" >/dev/null 2>&1; then
+    return 0
+  fi
+  command -v curl >/dev/null 2>&1 && curl -fs "http://${HOST}:${PORT}" >/dev/null 2>&1
+}
+
+pid_running() {
+  if [[ -f "$PID_FILE" ]]; then
+    local pid
+    pid="$(cat "$PID_FILE" || true)"
+    if [[ -n "${pid:-}" ]] && kill -0 "$pid" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+cmd="${1:-status}"
+case "$cmd" in
+  up|start)
+    if health_ready; then
+      echo "agent-mail: ready on ${HOST}:${PORT}"
+      exit 0
+    fi
+    if pid_running; then
+      echo "agent-mail: running (pid $(cat "$PID_FILE"))"
+      exit 0
+    fi
+    if [[ ! -x "$RUN_SCRIPT" ]]; then
+      echo "Agent Mail run script not found: $RUN_SCRIPT" >&2
+      exit 1
+    fi
+    ensure_venv
+    echo "Starting Agent Mail on ${HOST}:${PORT}..."
+    (
+      cd "$AGENT_MAIL_DIR"
+      HTTP_ALLOW_LOCALHOST_UNAUTHENTICATED=true \
+        AGENT_MAIL_PYTHON="$PYTHON_BIN" \
+        nohup "$RUN_SCRIPT" --host "$HOST" --port "$PORT" >"$LOG_FILE" 2>&1 &
+      echo $! > "$PID_FILE"
+    )
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      if health_ready; then
+        echo "agent-mail: ready on ${HOST}:${PORT}"
+        exit 0
+      fi
+      sleep 0.5
+    done
+    echo "agent-mail: starting (check logs: $LOG_FILE)"
+    ;;
+  run|fg|foreground)
+    if [[ ! -x "$RUN_SCRIPT" ]]; then
+      echo "Agent Mail run script not found: $RUN_SCRIPT" >&2
+      exit 1
+    fi
+    ensure_venv
+    cd "$AGENT_MAIL_DIR"
+    HTTP_ALLOW_LOCALHOST_UNAUTHENTICATED=true \
+      AGENT_MAIL_PYTHON="$PYTHON_BIN" \
+      exec "$RUN_SCRIPT" --host "$HOST" --port "$PORT"
+    ;;
+  down|stop)
+    if pid_running; then
+      pid="$(cat "$PID_FILE")"
+      echo "Stopping Agent Mail (pid $pid)"
+      kill "$pid" || true
+      : > "$PID_FILE"
+      exit 0
+    fi
+    echo "agent-mail: not running"
+    ;;
+  status)
+    if health_ready; then
+      echo "agent-mail: ready on ${HOST}:${PORT}"
+    elif pid_running; then
+      echo "agent-mail: running (pid $(cat "$PID_FILE"))"
+    elif port_open; then
+      echo "agent-mail: port ${PORT} open (health not ready)"
+    else
+      echo "agent-mail: not running"
+    fi
+    ;;
+  ps)
+    "$0" status
+    echo ""
+    if command -v lsof >/dev/null 2>&1; then
+      lsof -nP -iTCP:"$PORT" -sTCP:LISTEN || true
+    else
+      echo "lsof not found; use: lsof -nP -iTCP:${PORT} -sTCP:LISTEN"
+    fi
+    ;;
+  logs)
+    if [[ -f "$LOG_FILE" ]]; then
+      tail -n 120 "$LOG_FILE"
+    else
+      echo "No log file found: $LOG_FILE"
+    fi
+    ;;
+  *)
+    echo "Usage: agent-mail-stack up|run|down|status|ps|logs" >&2
+    exit 1
+    ;;
+esac

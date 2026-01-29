@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# agent-mail-open-all - set contact policy to "open" for all agents in a project
+#
+# Usage:
+#   agent-mail-open-all /abs/path/to/project
+#
+# Env:
+#   AGENT_MAIL_PROJECT  - project_key (absolute path)
+#   AGENT_MAIL_POLICY   - policy (default: open)
+#   AGENT_MAIL_URL      - MCP URL (default: http://127.0.0.1:8765/mcp/)
+#   AGENT_MAIL_TOKEN    - bearer token (optional)
+
+set -euo pipefail
+
+PROJECT="${1:-${AGENT_MAIL_PROJECT:-}}"
+POLICY="${AGENT_MAIL_POLICY:-open}"
+URL="${AGENT_MAIL_URL:-http://127.0.0.1:8765/mcp/}"
+TOKEN="${AGENT_MAIL_TOKEN:-}"
+
+if [[ -z "${PROJECT}" ]]; then
+  echo "Usage: agent-mail-open-all /abs/path/to/project" >&2
+  echo "Or set AGENT_MAIL_PROJECT." >&2
+  exit 1
+fi
+
+curl_args=(-sS --max-time 10 -X POST "${URL}" -H "Content-Type: application/json")
+if [[ -n "${TOKEN}" ]]; then
+  curl_args+=(-H "Authorization: Bearer ${TOKEN}")
+fi
+
+payload_agents="$(python3 - <<'PY'
+import json
+import os
+import urllib.parse
+
+project = os.environ["PROJECT"]
+uri = "resource://agents/" + urllib.parse.quote(project, safe="")
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": "agents",
+    "method": "resources/read",
+    "params": {"uri": uri},
+}))
+PY
+)"
+
+response="$(curl "${curl_args[@]}" -d "${payload_agents}" || true)"
+if [[ -z "${response}" ]]; then
+  echo "No response from Agent Mail at ${URL}" >&2
+  exit 1
+fi
+
+agent_names="$(python3 - <<'PY'
+import json
+import sys
+
+data = json.loads(sys.stdin.read())
+if "error" in data:
+    msg = data["error"].get("message", "unknown error")
+    print(msg, file=sys.stderr)
+    sys.exit(1)
+
+agents = data.get("result", {}).get("agents", [])
+for agent in agents:
+    name = agent.get("name")
+    if name:
+        print(name)
+PY
+<<<"${response}")"
+
+if [[ -z "${agent_names}" ]]; then
+  echo "No agents found for project: ${PROJECT}"
+  exit 0
+fi
+
+count=0
+while IFS= read -r agent_name; do
+  [[ -z "${agent_name}" ]] && continue
+  payload_set="$(PROJECT="${PROJECT}" AGENT_NAME="${agent_name}" POLICY="${POLICY}" python3 - <<'PY'
+import json
+import os
+
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": "set_policy",
+    "method": "tools/call",
+    "params": {
+        "name": "set_contact_policy",
+        "arguments": {
+            "project_key": os.environ["PROJECT"],
+            "agent_name": os.environ["AGENT_NAME"],
+            "policy": os.environ["POLICY"],
+        },
+    },
+}))
+PY
+)"
+  curl "${curl_args[@]}" -d "${payload_set}" >/dev/null || {
+    echo "Failed to set policy for ${agent_name}" >&2
+    exit 1
+  }
+  count=$((count + 1))
+done <<<"${agent_names}"
+
+echo "Set contact policy '${POLICY}' for ${count} agent(s) in ${PROJECT}"

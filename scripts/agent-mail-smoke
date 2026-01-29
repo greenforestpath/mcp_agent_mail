@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+# agent-mail-smoke - minimal end-to-end MCP smoke test
+#
+# Usage:
+#   agent-mail-smoke [/abs/path/to/project]
+#
+# Env:
+#   AGENT_MAIL_PROJECT  - project_key (absolute path; default: pwd)
+#   AGENT_MAIL_URL      - MCP URL (default: http://127.0.0.1:8765/mcp/)
+#   AGENT_MAIL_TOKEN    - bearer token (optional)
+
+set -euo pipefail
+
+PROJECT="${1:-${AGENT_MAIL_PROJECT:-$(pwd)}}"
+URL="${AGENT_MAIL_URL:-http://127.0.0.1:8765/mcp/}"
+TOKEN="${AGENT_MAIL_TOKEN:-}"
+export PROJECT
+
+curl_args=(-sS --max-time 10 -X POST "${URL}" -H "Content-Type: application/json")
+if [[ -n "${TOKEN}" ]]; then
+  curl_args+=(-H "Authorization: Bearer ${TOKEN}")
+fi
+
+post_json() {
+  curl "${curl_args[@]}" -d "$1"
+}
+
+require_ok() {
+  python3 - <<'PY' <<EOF
+import json
+import sys
+
+data = json.loads(sys.stdin.read())
+if "error" in data:
+    msg = data["error"].get("message", "unknown error")
+    print(msg, file=sys.stderr)
+    sys.exit(1)
+print("ok")
+PY
+EOF
+}
+
+echo "[1/6] health_check"
+payload="$(python3 - <<'PY'
+import json
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": "health",
+    "method": "tools/call",
+    "params": {"name": "health_check", "arguments": {}},
+}))
+PY
+)"
+response="$(post_json "${payload}")"
+require_ok <<<"${response}" >/dev/null
+
+echo "[2/6] ensure_project (${PROJECT})"
+payload="$(python3 - <<'PY'
+import json
+import os
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": "ensure_project",
+    "method": "tools/call",
+    "params": {"name": "ensure_project", "arguments": {"human_key": os.environ["PROJECT"]}},
+}))
+PY
+)"
+response="$(post_json "${payload}")"
+require_ok <<<"${response}" >/dev/null
+
+echo "[3/6] register_agent (BlueLake)"
+payload="$(python3 - <<'PY'
+import json
+import os
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": "register_blue",
+    "method": "tools/call",
+    "params": {"name": "register_agent", "arguments": {
+        "project_key": os.environ["PROJECT"],
+        "program": "smoke-test",
+        "model": "smoke-test",
+        "name": "BlueLake",
+        "task_description": "agent-mail smoke test",
+    }},
+}))
+PY
+)"
+response="$(post_json "${payload}")"
+require_ok <<<"${response}" >/dev/null
+
+echo "[4/6] register_agent (GreenStone)"
+payload="$(python3 - <<'PY'
+import json
+import os
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": "register_green",
+    "method": "tools/call",
+    "params": {"name": "register_agent", "arguments": {
+        "project_key": os.environ["PROJECT"],
+        "program": "smoke-test",
+        "model": "smoke-test",
+        "name": "GreenStone",
+        "task_description": "agent-mail smoke test",
+    }},
+}))
+PY
+)"
+response="$(post_json "${payload}")"
+require_ok <<<"${response}" >/dev/null
+
+echo "[5/6] set_contact_policy (open)"
+payload="$(python3 - <<'PY'
+import json
+import os
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": "policy_blue",
+    "method": "tools/call",
+    "params": {"name": "set_contact_policy", "arguments": {
+        "project_key": os.environ["PROJECT"],
+        "agent_name": "BlueLake",
+        "policy": "open",
+    }},
+}))
+PY
+)"
+response="$(post_json "${payload}")"
+require_ok <<<"${response}" >/dev/null
+
+payload="$(python3 - <<'PY'
+import json
+import os
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": "policy_green",
+    "method": "tools/call",
+    "params": {"name": "set_contact_policy", "arguments": {
+        "project_key": os.environ["PROJECT"],
+        "agent_name": "GreenStone",
+        "policy": "open",
+    }},
+}))
+PY
+)"
+response="$(post_json "${payload}")"
+require_ok <<<"${response}" >/dev/null
+
+echo "[6/6] send_message + fetch_inbox"
+payload="$(python3 - <<'PY'
+import json
+import os
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": "send",
+    "method": "tools/call",
+    "params": {"name": "send_message", "arguments": {
+        "project_key": os.environ["PROJECT"],
+        "sender_name": "BlueLake",
+        "to": ["GreenStone"],
+        "subject": "smoke test",
+        "body_md": "hello from smoke test",
+    }},
+}))
+PY
+)"
+response="$(post_json "${payload}")"
+require_ok <<<"${response}" >/dev/null
+
+payload="$(python3 - <<'PY'
+import json
+import os
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": "inbox",
+    "method": "tools/call",
+    "params": {"name": "fetch_inbox", "arguments": {
+        "project_key": os.environ["PROJECT"],
+        "agent_name": "GreenStone",
+        "limit": 5,
+        "include_bodies": False,
+    }},
+}))
+PY
+)"
+response="$(post_json "${payload}")"
+require_ok <<<"${response}" >/dev/null
+
+echo "agent-mail smoke: OK"

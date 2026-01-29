@@ -18,4 +18,13 @@ PY
 fi
 export HTTP_BEARER_TOKEN
 
-uv run python -m mcp_agent_mail.cli serve-http "$@"
+PYTHON_BIN="${AGENT_MAIL_PYTHON:-}"
+if [[ -z "${PYTHON_BIN}" && -x ".venv/bin/python" ]]; then
+  PYTHON_BIN=".venv/bin/python"
+fi
+
+if [[ -n "${PYTHON_BIN}" ]]; then
+  exec "${PYTHON_BIN}" -m mcp_agent_mail.cli serve-http "$@"
+fi
+
+exec uv run python -m mcp_agent_mail.cli serve-http "$@"
