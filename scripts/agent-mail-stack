@@ -19,7 +19,7 @@ VENV_DIR="${AGENT_MAIL_VENV:-$AGENT_MAIL_DIR/.venv}"
 PYTHON_BIN="$VENV_DIR/bin/python"
 
 HOST="${AGENT_MAIL_HOST:-127.0.0.1}"
-PORT="${AGENT_MAIL_PORT:-8765}"
+PORT="${AGENT_MAIL_PORT:-8766}"
 LOG_FILE="${AGENT_MAIL_LOG_FILE:-/tmp/agent-mail.log}"
 PID_FILE="${AGENT_MAIL_PID_FILE:-/tmp/agent-mail.pid}"
 CACHE_ROOT="${AGENT_MAIL_CACHE_ROOT:-$HOME/.cache/cfos/agent-mail}"

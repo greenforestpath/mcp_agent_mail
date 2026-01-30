@@ -2275,10 +2275,26 @@ def build_http_app(settings: Settings, server=None) -> FastAPI:
                 # Get all agents for this project
                 pid = int(prow[0])
                 agent_rows = await session.execute(
-                    text("SELECT name FROM agents WHERE project_id = :pid ORDER BY name"),
-                    {"pid": pid}
+                    text(
+                        """
+                        SELECT name, identity_tag, program, model, last_active_ts
+                        FROM agents
+                        WHERE project_id = :pid
+                        ORDER BY last_active_ts DESC, name ASC
+                        """
+                    ),
+                    {"pid": pid},
                 )
-                agents = [{"name": r[0]} for r in agent_rows.fetchall()]
+                agents = [
+                    {
+                        "name": r[0],
+                        "identity_tag": r[1] or "",
+                        "program": r[2] or "",
+                        "model": r[3] or "",
+                        "last_active": str(r[4]) if r[4] else None,
+                    }
+                    for r in agent_rows.fetchall()
+                ]
 
             return await _render(
                 "overseer_compose.html",
