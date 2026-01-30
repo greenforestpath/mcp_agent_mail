@@ -16,6 +16,7 @@ PROJECT="${1:-${AGENT_MAIL_PROJECT:-}}"
 POLICY="${AGENT_MAIL_POLICY:-open}"
 URL="${AGENT_MAIL_URL:-http://127.0.0.1:8765/mcp/}"
 TOKEN="${AGENT_MAIL_TOKEN:-}"
+export PROJECT
 
 if [[ -z "${PROJECT}" ]]; then
   echo "Usage: agent-mail-open-all /abs/path/to/project" >&2
@@ -26,6 +27,25 @@ fi
 curl_args=(-sS --max-time 10 -X POST "${URL}" -H "Content-Type: application/json")
 if [[ -n "${TOKEN}" ]]; then
   curl_args+=(-H "Authorization: Bearer ${TOKEN}")
+fi
+
+payload_ensure="$(python3 - <<'PY'
+import json
+import os
+
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": "ensure_project",
+    "method": "tools/call",
+    "params": {"name": "ensure_project", "arguments": {"human_key": os.environ["PROJECT"]}},
+}))
+PY
+)"
+
+ensure_response="$(curl "${curl_args[@]}" -d "${payload_ensure}" || true)"
+if [[ -z "${ensure_response}" ]]; then
+  echo "No response from Agent Mail at ${URL} (ensure_project)" >&2
+  exit 1
 fi
 
 payload_agents="$(python3 - <<'PY'
@@ -54,7 +74,11 @@ agent_names="$(python3 - <<'PY'
 import json
 import sys
 
-data = json.loads(sys.stdin.read())
+raw = sys.stdin.read().strip()
+if not raw:
+    print("", file=sys.stderr)
+    sys.exit(1)
+data = json.loads(raw)
 if "error" in data:
     msg = data["error"].get("message", "unknown error")
     print(msg, file=sys.stderr)

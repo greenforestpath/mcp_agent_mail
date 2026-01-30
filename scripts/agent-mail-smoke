@@ -30,11 +30,26 @@ require_ok() {
 import json
 import sys
 
-data = json.loads(sys.stdin.read())
+raw = sys.stdin.read().strip()
+if not raw:
+    print("Empty response", file=sys.stderr)
+    sys.exit(1)
+
+data = json.loads(raw)
 if "error" in data:
     msg = data["error"].get("message", "unknown error")
     print(msg, file=sys.stderr)
     sys.exit(1)
+
+result = data.get("result")
+if isinstance(result, dict) and result.get("isError") is True:
+    content = result.get("content") or []
+    msg = "MCP tool error"
+    if content and isinstance(content, list) and isinstance(content[0], dict):
+        msg = content[0].get("text") or msg
+    print(msg, file=sys.stderr)
+    sys.exit(1)
+
 print("ok")
 PY
 EOF

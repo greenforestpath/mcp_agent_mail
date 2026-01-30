@@ -626,6 +626,36 @@ Instead, we give you **discovery + control**:
 
 **Think of it like LinkedIn**: The system suggests connections, but only *you* decide who gets to send messages.
 
+#### Implementation Details (How Smart Suggestions + Linking Work)
+
+**Data model**
+- Suggestions are stored in SQLite table `project_sibling_suggestions` as **undirected pairs** (`project_a_id`, `project_b_id`).
+- Each row tracks `score` (0-1), `rationale`, and `status` (`suggested | confirmed | dismissed`), plus timestamps.
+
+**Suggestion generation**
+- Runs in the server whenever `/mail` or `/mail/projects` loads (the UI calls `refresh_project_sibling_suggestions()`).
+- Evaluates up to **3 project pairs per refresh** to keep requests fast.
+- Uses two layers:
+  1. **Heuristic similarity** (always on): slug similarity, human_key/path similarity, and shared parent directory.
+  2. **LLM scoring** (optional): if `LLM_ENABLED=true`, builds project profiles and asks the LLM for a JSON score + rationale.
+- Project profiles include: `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/README.md`, etc. (limited to ~6k chars total).
+
+**Refresh + thresholds**
+- Re-evaluates a pair only every **12 hours** (TTL).
+- Dismissed suggestions are **ignored for 7 days** before re-evaluation.
+- Suggestions appear in the UI only if **score >= 0.92** and status is not dismissed.
+
+**Confirm / Dismiss (linking)**
+- Clicking **Confirm** or **Dismiss** calls:
+  - `POST /api/projects/{project_id}/siblings/{other_id}` with `{"action":"confirm|dismiss|reset"}`
+- This **only updates UI relationships** (badges + navigation). It **does NOT** grant messaging permissions.
+- Cross-project messaging still requires explicit agent links via `request_contact` / `respond_contact`.
+
+**Where to look in code**
+- Scoring + refresh: `mcp_agent_mail/src/mcp_agent_mail/app.py` (`refresh_project_sibling_suggestions`, `_score_project_pair`)
+- Storage: `mcp_agent_mail/src/mcp_agent_mail/models.py` (`ProjectSiblingSuggestion`)
+- UI + API: `mcp_agent_mail/src/mcp_agent_mail/http.py` and `templates/mail_index.html`
+
 ### Search syntax (UI)
 
 The UI shares the same parsing as the API's `_parse_fts_query`:

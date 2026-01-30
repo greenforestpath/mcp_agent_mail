@@ -22,6 +22,15 @@ HOST="${AGENT_MAIL_HOST:-127.0.0.1}"
 PORT="${AGENT_MAIL_PORT:-8765}"
 LOG_FILE="${AGENT_MAIL_LOG_FILE:-/tmp/agent-mail.log}"
 PID_FILE="${AGENT_MAIL_PID_FILE:-/tmp/agent-mail.pid}"
+CACHE_ROOT="${AGENT_MAIL_CACHE_ROOT:-$HOME/.cache/cfos/agent-mail}"
+DB_PATH="${AGENT_MAIL_DB_PATH:-$CACHE_ROOT/storage.sqlite3}"
+STORAGE_ROOT="${AGENT_MAIL_STORAGE_ROOT:-$CACHE_ROOT/archive}"
+DATABASE_URL="${DATABASE_URL:-sqlite+aiosqlite:///${DB_PATH}}"
+
+ensure_storage_dirs() {
+  mkdir -p "$CACHE_ROOT"
+  mkdir -p "$STORAGE_ROOT"
+}
 
 ensure_venv() {
   if [[ -x "$PYTHON_BIN" ]]; then
@@ -78,10 +87,13 @@ case "$cmd" in
       exit 1
     fi
     ensure_venv
+    ensure_storage_dirs
     echo "Starting Agent Mail on ${HOST}:${PORT}..."
     (
       cd "$AGENT_MAIL_DIR"
       HTTP_ALLOW_LOCALHOST_UNAUTHENTICATED=true \
+        DATABASE_URL="$DATABASE_URL" \
+        STORAGE_ROOT="$STORAGE_ROOT" \
         AGENT_MAIL_PYTHON="$PYTHON_BIN" \
         nohup "$RUN_SCRIPT" --host "$HOST" --port "$PORT" >"$LOG_FILE" 2>&1 &
       echo $! > "$PID_FILE"
@@ -101,8 +113,11 @@ case "$cmd" in
       exit 1
     fi
     ensure_venv
+    ensure_storage_dirs
     cd "$AGENT_MAIL_DIR"
     HTTP_ALLOW_LOCALHOST_UNAUTHENTICATED=true \
+      DATABASE_URL="$DATABASE_URL" \
+      STORAGE_ROOT="$STORAGE_ROOT" \
       AGENT_MAIL_PYTHON="$PYTHON_BIN" \
       exec "$RUN_SCRIPT" --host "$HOST" --port "$PORT"
     ;;
