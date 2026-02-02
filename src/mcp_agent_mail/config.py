@@ -89,6 +89,7 @@ class StorageSettings:
     inline_image_max_bytes: int
     convert_images: bool
     keep_original_images: bool
+    allow_absolute_attachment_paths: bool
 
 
 @dataclass(slots=True, frozen=True)
@@ -288,7 +289,7 @@ def get_settings() -> Settings:
     http_settings = HttpSettings(
         host=_decouple_config("HTTP_HOST", default="127.0.0.1"),
         port=_int(_decouple_config("HTTP_PORT", default="8765"), default=8765),
-        path=_decouple_config("HTTP_PATH", default="/mcp/"),
+        path=_decouple_config("HTTP_PATH", default="/api/"),
         bearer_token=_decouple_config("HTTP_BEARER_TOKEN", default="") or None,
         rate_limit_enabled=_bool(_decouple_config("HTTP_RATE_LIMIT_ENABLED", default="false"), default=False),
         rate_limit_per_minute=_int(_decouple_config("HTTP_RATE_LIMIT_PER_MINUTE", default="60"), default=60),
@@ -328,6 +329,7 @@ def get_settings() -> Settings:
         pool_timeout=_int_optional(_decouple_config("DATABASE_POOL_TIMEOUT", default="")),
     )
 
+    allow_abs_default = "true" if environment.lower() == "development" else "false"
     storage_settings = StorageSettings(
         # Default to a global, user-scoped archive directory outside the source tree
         root=_decouple_config("STORAGE_ROOT", default="~/.mcp_agent_mail_git_mailbox_repo"),
@@ -336,10 +338,15 @@ def get_settings() -> Settings:
         inline_image_max_bytes=_int(_decouple_config("INLINE_IMAGE_MAX_BYTES", default=str(64 * 1024)), default=64 * 1024),
         convert_images=_bool(_decouple_config("CONVERT_IMAGES", default="true"), default=True),
         keep_original_images=_bool(_decouple_config("KEEP_ORIGINAL_IMAGES", default="false"), default=False),
+        allow_absolute_attachment_paths=_bool(
+            _decouple_config("ALLOW_ABSOLUTE_ATTACHMENT_PATHS", default=allow_abs_default),
+            default=allow_abs_default == "true",
+        ),
     )
 
+    cors_default = "true" if environment.lower() == "development" else "false"
     cors_settings = CorsSettings(
-        enabled=_bool(_decouple_config("HTTP_CORS_ENABLED", default="false"), default=False),
+        enabled=_bool(_decouple_config("HTTP_CORS_ENABLED", default=cors_default), default=cors_default == "true"),
         origins=_csv("HTTP_CORS_ORIGINS", default=""),
         allow_credentials=_bool(_decouple_config("HTTP_CORS_ALLOW_CREDENTIALS", default="false"), default=False),
         allow_methods=_csv("HTTP_CORS_ALLOW_METHODS", default="*"),

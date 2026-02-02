@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import base64
 import contextlib
+import hmac
 import importlib
 import json
 import logging
@@ -18,8 +19,10 @@ from typing import Any, Protocol, cast
 import structlog
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.exc import NoResultFound
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -209,6 +212,28 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         self._token = token
         self._allow_localhost = allow_localhost
 
+    @staticmethod
+    def _is_localhost(host: str) -> bool:
+        """Check if host is a localhost address, including IPv4-mapped IPv6."""
+        if not host:
+            return False
+        # Standard localhost addresses
+        if host in {"127.0.0.1", "::1", "localhost"}:
+            return True
+        # IPv4-mapped IPv6 address (::ffff:127.0.0.1)
+        if host.lower().startswith("::ffff:") and host[7:] == "127.0.0.1":
+            return True
+        return False
+
+    @staticmethod
+    def _has_forwarded_headers(request: Request) -> bool:
+        """Detect proxy-forwarded headers to avoid trusting localhost behind proxies."""
+        headers = request.headers
+        return any(
+            name in headers
+            for name in ("x-forwarded-for", "x-forwarded-proto", "x-forwarded-host", "forwarded")
+        )
+
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint):
         if request.method == "OPTIONS":  # allow CORS preflight
             return await call_next(request)
@@ -219,10 +244,13 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
             client_host = request.client.host if request.client else ""
         except Exception:
             client_host = ""
-        if self._allow_localhost and client_host in {"127.0.0.1", "::1", "localhost"}:
+        # Check for localhost bypass (including IPv4-mapped IPv6 addresses)
+        if self._allow_localhost and self._is_localhost(client_host) and not self._has_forwarded_headers(request):
             return await call_next(request)
         auth_header = request.headers.get("Authorization", "")
-        if auth_header != f"Bearer {self._token}":
+        expected_header = f"Bearer {self._token}"
+        # Use constant-time comparison to prevent timing attacks
+        if not hmac.compare_digest(auth_header, expected_header):
             return JSONResponse({"detail": "Unauthorized"}, status_code=status.HTTP_401_UNAUTHORIZED)
         return await call_next(request)
 
@@ -448,11 +476,11 @@ class SecurityAndRateLimitMiddleware(BaseHTTPMiddleware):
                 client_host = request.client.host if request.client else ""
             except Exception:
                 client_host = ""
-            if bool(getattr(self.settings.http, "allow_localhost_unauthenticated", False)) and client_host in {
-                "127.0.0.1",
-                "::1",
-                "localhost",
-            }:
+            if (
+                bool(getattr(self.settings.http, "allow_localhost_unauthenticated", False))
+                and client_host in {"127.0.0.1", "::1", "localhost"}
+                and not BearerAuthMiddleware._has_forwarded_headers(request)
+            ):
                 roles.add("writer")
 
         # RBAC enforcement (skip for localhost when allowed)
@@ -460,11 +488,11 @@ class SecurityAndRateLimitMiddleware(BaseHTTPMiddleware):
             client_host = request.client.host if request.client else ""
         except Exception:
             client_host = ""
-        is_local_ok = bool(getattr(self.settings.http, "allow_localhost_unauthenticated", False)) and client_host in {
-            "127.0.0.1",
-            "::1",
-            "localhost",
-        }
+        is_local_ok = (
+            bool(getattr(self.settings.http, "allow_localhost_unauthenticated", False))
+            and client_host in {"127.0.0.1", "::1", "localhost"}
+            and not BearerAuthMiddleware._has_forwarded_headers(request)
+        )
         if self._rbac_enabled and not is_local_ok and kind in {"tools", "resources"}:
             is_reader = bool(roles & self._reader_roles)
             is_writer = bool(roles & self._writer_roles) or (not roles)
@@ -1063,11 +1091,13 @@ def build_http_app(settings: Settings, server=None) -> FastAPI:
                 finally:
                     with contextlib.suppress(Exception):
                         await http_transport.terminate()
-                    with contextlib.suppress(Exception):
+                    if not server_task.done():
+                        server_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
                         await server_task
 
     # Mount at both '/base' and '/base/' to tolerate either form from clients/tests
-    mount_base = settings.http.path or "/mcp"
+    mount_base = settings.http.path or "/api"
     if not mount_base.startswith("/"):
         mount_base = "/" + mount_base
     base_no_slash = mount_base.rstrip("/") or "/"
@@ -1544,7 +1574,7 @@ def build_http_app(settings: Settings, server=None) -> FastAPI:
                 results=matched_messages,
             )
 
-        @fastapi_app.post("/api/projects/{project_id}/siblings/{other_id}", response_class=JSONResponse)
+        @fastapi_app.post("/mail/api/projects/{project_id}/siblings/{other_id}", response_class=JSONResponse)
         async def update_project_sibling(project_id: int, other_id: int, request: Request) -> JSONResponse:
             try:
                 payload = await request.json()
@@ -2839,7 +2869,7 @@ def build_http_app(settings: Settings, server=None) -> FastAPI:
             finally:
                 repo.close()
 
-        @fastapi_app.get("/api/projects/{project}/agents")
+        @fastapi_app.get("/mail/api/projects/{project}/agents")
         async def api_project_agents(project: str) -> JSONResponse:
             """Get list of agents for a project."""
             # Validate project slug
@@ -2925,6 +2955,37 @@ def build_http_app(settings: Settings, server=None) -> FastAPI:
         with contextlib.suppress(Exception):
             structlog.get_logger("ui").error("ui_init_failed", error=str(exc))
         pass
+
+    # Static web UI (SPA) routing support
+    def _resolve_web_root() -> Path | None:
+        candidates: list[Path] = []
+        try:
+            candidates.append(Path(__file__).resolve().parents[3] / "web")
+        except Exception:
+            pass
+        candidates.append(Path.cwd() / "web")
+        for candidate in candidates:
+            try:
+                if candidate.exists() and (candidate / "index.html").exists():
+                    return candidate
+            except Exception:
+                continue
+        return None
+
+    web_root = _resolve_web_root()
+    if web_root is not None:
+        fastapi_app.mount("/", StaticFiles(directory=str(web_root), html=True), name="web")
+
+        def _is_api_path(path: str) -> bool:
+            if base_no_slash == "/":
+                return True
+            return path == base_no_slash or path.startswith(base_no_slash + "/")
+
+        @fastapi_app.exception_handler(HTTPException)
+        async def spa_fallback(request: Request, exc: HTTPException):
+            if exc.status_code == status.HTTP_404_NOT_FOUND and not _is_api_path(request.url.path):
+                return FileResponse(web_root / "index.html")
+            return await http_exception_handler(request, exc)
 
     return fastapi_app
 

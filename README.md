@@ -1735,6 +1735,7 @@ sequenceDiagram
 - Attachments
   - Image references (file path or data URI) are converted to WebP; small images embed inline when policy allows
   - Non-absolute `attachment_paths` (and markdown image paths) resolve relative to the project archive root under `STORAGE_ROOT/projects/<slug>/`, not the code repo root
+  - Absolute attachment paths are allowed only when `ALLOW_ABSOLUTE_ATTACHMENT_PATHS=true` (defaults to true in development, false otherwise)
   - Stored under `attachments/<xx>/<sha1>.webp` and referenced by relative path in frontmatter
 - File Reservations
   - TTL-based; exclusive means "please don't modify overlapping surfaces" for others until expiry or release
@@ -2038,7 +2039,7 @@ decouple_config = DecoupleConfig(RepositoryEnv(".env"))
 STORAGE_ROOT = decouple_config("STORAGE_ROOT", default="~/.mcp_agent_mail_git_mailbox_repo")
 HTTP_HOST = decouple_config("HTTP_HOST", default="127.0.0.1")
 HTTP_PORT = int(decouple_config("HTTP_PORT", default=8765))
-HTTP_PATH = decouple_config("HTTP_PATH", default="/mcp/")
+HTTP_PATH = decouple_config("HTTP_PATH", default="/api/")
 ```
 
 Common variables you may set:
@@ -2050,7 +2051,7 @@ Common variables you may set:
 | `STORAGE_ROOT` | `~/.mcp_agent_mail_git_mailbox_repo` | Root for per-project repos and SQLite DB |
 | `HTTP_HOST` | `127.0.0.1` | Bind host for HTTP transport |
 | `HTTP_PORT` | `8765` | Bind port for HTTP transport |
-| `HTTP_PATH` | `/mcp/` | HTTP path where MCP endpoint is mounted |
+| `HTTP_PATH` | `/api/` | HTTP path where MCP endpoint is mounted |
 | `HTTP_JWT_ENABLED` | `false` | Enable JWT validation middleware |
 | `HTTP_JWT_SECRET` |  | HMAC secret for HS* algorithms (dev) |
 | `HTTP_JWT_JWKS_URL` |  | JWKS URL for public key verification |
@@ -2081,6 +2082,7 @@ Common variables you may set:
 | `INLINE_IMAGE_MAX_BYTES` | `65536` | Threshold (bytes) for inlining WebP images during send_message |
 | `CONVERT_IMAGES` | `true` | Convert images to WebP (and optionally inline small ones) |
 | `KEEP_ORIGINAL_IMAGES` | `false` | Also store original image bytes alongside WebP (attachments/originals/) |
+| `ALLOW_ABSOLUTE_ATTACHMENT_PATHS` | `true (dev) / false (non-dev)` | Allow absolute file paths in attachment_paths and markdown image links |
 | `LOG_LEVEL` | `INFO` | Server log level |
 | `HTTP_CORS_ENABLED` | `false` | Enable CORS middleware when true |
 | `HTTP_CORS_ORIGINS` |  | CSV of allowed origins (e.g., `https://app.example.com,https://ops.example.com`) |
@@ -2169,7 +2171,7 @@ uv run python -m mcp_agent_mail.cli serve-http
 uv run python -m mcp_agent_mail.http --host 127.0.0.1 --port 8765
 ```
 
-Connect with your MCP client using the HTTP (Streamable HTTP) transport on the configured host/port. The endpoint tolerates both `/mcp` and `/mcp/`.
+Connect with your MCP client using the HTTP (Streamable HTTP) transport on the configured host/port. The endpoint tolerates both `/api` and `/api/`.
 
 ## Search syntax tips (SQLite FTS5)
 
@@ -2209,6 +2211,7 @@ This section has been removed to keep the README focused. See API Quick Referenc
   - When JWKS is configured (`HTTP_JWT_JWKS_URL`), incoming JWTs must include a matching `kid` header; tokens without `kid` or with unknown `kid` are rejected
   - Starter RBAC (reader vs writer) using role configuration; see `HTTP_RBAC_*` settings
   - Bearer-only RBAC note: when JWT is disabled, requests use `HTTP_RBAC_DEFAULT_ROLE` (default `reader`). That means non-localhost tool calls are read-only unless you set `HTTP_RBAC_DEFAULT_ROLE=writer`, disable RBAC (`HTTP_RBAC_ENABLED=false`), or switch to JWT roles. Localhost requests with `HTTP_ALLOW_LOCALHOST_UNAUTHENTICATED=true` are auto-elevated to writer.
+  - Localhost bypass is disabled when proxy headers are present (`Forwarded` / `X-Forwarded-*`) to avoid auth bypass behind reverse proxies.
 - Reverse proxy + TLS (minimal example)
   - NGINX location block:
     ```nginx
@@ -2218,7 +2221,7 @@ This section has been removed to keep the README focused. See API Quick Referenc
       server_name mcp.example.com;
       ssl_certificate /etc/letsencrypt/live/mcp.example.com/fullchain.pem;
       ssl_certificate_key /etc/letsencrypt/live/mcp.example.com/privkey.pem;
-      location /mcp/ { proxy_pass http://mcp_mail; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto https; }
+      location /api/ { proxy_pass http://mcp_mail; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto https; }
     }
     ```
 - Backups and retention
@@ -2619,7 +2622,7 @@ The inbox check hooks accept these environment variables (set automatically by t
 |----------|-------------|---------|
 | `AGENT_MAIL_PROJECT` | Project key (absolute path) | *required* |
 | `AGENT_MAIL_AGENT` | Agent name | *required* |
-| `AGENT_MAIL_URL` | Server URL | `http://127.0.0.1:8765/mcp/` |
+| `AGENT_MAIL_URL` | Server URL | `http://127.0.0.1:8765/api/` |
 | `AGENT_MAIL_TOKEN` | Bearer token | *none* |
 | `AGENT_MAIL_INTERVAL` | Seconds between checks | `120` |
 

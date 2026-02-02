@@ -56,7 +56,7 @@ class _CommitRequest:
     settings: Settings
     message: str
     rel_paths: list[str]
-    future: asyncio.Future[None] = field(default_factory=lambda: asyncio.get_event_loop().create_future())
+    future: asyncio.Future[None] = field(default_factory=lambda: asyncio.get_running_loop().create_future())
     created_at: float = field(default_factory=time.monotonic)
 
 
@@ -1354,7 +1354,9 @@ async def _update_thread_digest(
                 f.write(f"# Thread {thread_id}\n\n")
             f.write(entry)
 
-    await _to_thread(_append)
+    lock_path = digest_path.with_suffix(f"{digest_path.suffix}.lock")
+    async with AsyncFileLock(lock_path):
+        await _to_thread(_append)
     return digest_path.relative_to(archive.repo_root).as_posix()
 
 
@@ -1421,7 +1423,14 @@ async def process_attachments(
     if attachment_paths:
         for path in attachment_paths:
             p = Path(path)
-            resolved = p.expanduser().resolve() if p.is_absolute() else _resolve_archive_relative_path(archive, path)
+            if p.is_absolute():
+                if not archive.settings.storage.allow_absolute_attachment_paths:
+                    raise ValueError(
+                        "Absolute attachment paths are disabled. Set ALLOW_ABSOLUTE_ATTACHMENT_PATHS=true to enable."
+                    )
+                resolved = p.expanduser().resolve()
+            else:
+                resolved = _resolve_archive_relative_path(archive, path)
             meta, rel_path = await _store_image(archive, resolved, embed_policy=embed_policy)
             attachments_meta.append(meta)
             if rel_path:
@@ -1467,6 +1476,10 @@ async def _convert_markdown_images(
             continue
         file_path = Path(normalized_path)
         if file_path.is_absolute():
+            if not archive.settings.storage.allow_absolute_attachment_paths:
+                result_parts.append(raw_path)
+                last_idx = path_end
+                continue
             file_path = file_path.expanduser().resolve()
         else:
             try:
